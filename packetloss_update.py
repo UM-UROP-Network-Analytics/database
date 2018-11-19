@@ -217,23 +217,40 @@ def updateLookup ( item ):
 def updateSummary( item ):
     rt_src = item['_source']['src']
     rt_dest = item['_source']['dest']
+    rt_ts = item['_source']['timestamp']
+    rt_ts = rt_ts / 1000
+    #fix timestamp formatting to match postgreSQL format
+    format_ts = time.strftime("%Y-%m-%d %H:%M:%S-0000", time.gmtime(rt_ts))
     try:
         #if this src/dest pair not yet tracked in packet loss, add it w/ count of 1
-        cur.execute("INSERT INTO losscount (src, dest, count) VALUES (%s, %s, %s)", (rt_src, rt_dest, 1))
+        cur.execute("INSERT INTO losscount (src, dest, count, min_ts, max_ts) VALUES (%s, %s, %s)", (rt_src, rt_dest, 1, format_ts, format_ts))
         conn.commit()
     except IntegrityError:
         conn.rollback()
         #if it has been tracked, increment count by 1
         cur.execute("SELECT count FROM losscount WHERE src = %s AND dest = %s", (rt_src, rt_dest))
         current_count = cur.fetchone()[0]
+        #make sure that we somehow aren't missing a min_ts for an existing route
+        cur.execute("SELECT min_ts FROM losscount WHERE src = %s AND dest = %s", (rt_src, rt_dest))
+        min_check = cur.fetchone()[0]
         if current_count is None:
-            #account for error case where src/dest pair in table but count in null for some reason
-            cur.execute("UPDATE losscount SET count = %s WHERE src = %s AND dest = %s", (1, rt_src, rt_dest))
-            conn.commit()
+            if min_check is None:
+                #error case w/ missing min_ts
+                cur.execute("UPDATE losscount SET count = %s, min_ts = %s, max_ts = %s WHERE src = %s AND dest = %s", (1, format_ts, format_ts, rt_src, rt_dest))
+                conn.commit()
+            else:
+                #account for error case where src/dest pair in table but count in null for some reason
+                cur.execute("UPDATE losscount SET count = %s, max_ts = %s WHERE src = %s AND dest = %s", (1, format_ts, rt_src, rt_dest))
+                conn.commit()
         else:
-            #else add 1 to count normally
-            cur.execute("UPDATE losscount SET count = %s WHERE src = %s AND dest = %s", (current_count+1, rt_src, rt_dest))
-            conn.commit()
+            if min_check is None:
+                #error case w/ missing min_ts
+                cur.execute("UPDATE losscount SET count = %s, min_ts = %s, max_ts = %s WHERE src = %s AND dest = %s", (1, format_ts, format_ts, rt_src, rt_dest))
+                conn.commit()
+            else:
+                #else add 1 to count normally
+                cur.execute("UPDATE losscount SET count = %s, max_ts WHERE src = %s AND dest = %s", (current_count+1, format_ts, rt_src, rt_dest))
+                conn.commit()
 
 #remove lock
 def rm_lock():
