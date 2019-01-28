@@ -87,7 +87,7 @@ def updateRaw( item ):
         #if IntegrityError, failed due to key violation (src, dest, timestamp triple already in table)
         #in that case, continue (skip to next iteration of loop)
         conn.rollback()
-        continue
+        pass
 
 #updates the server lookup table
 def updateLookup ( item ):
