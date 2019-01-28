@@ -88,7 +88,7 @@ def updateRaw( item ):
         #if IntegrityError, failed due to key violation (src, dest, timestamp triple already in table)
         #in that case, continue (skip to next iteration of loop)
         conn.rollback()
-        continue
+        pass
 
 #updates the server lookup table
 def updateLookup ( item ):
@@ -201,7 +201,7 @@ def updateLookup ( item ):
                 if cur == 'missing':
                     cur.execute("UPDATE serverlookup SET sitename = %s WHERE domain = %s", (dest_site, dest_name))
                     conn.commit()
-    else:
+        else:
             cur.execute("UPDATE serverlookup SET domain = %s, ipv4 = %s WHERE ipv4 = %s", (dest_name, rt_dest, rt_dest))
             conn.commit()
             cur.execute("SELECT sitename FROM serverlookup WHERE domain = %s", (dest_name,))
