@@ -26,6 +26,7 @@ else:
 
 #connect to the database
 es = elasticsearch.Elasticsearch(['atlas-kibana.mwt2.org:9200'],timeout=60)
+#
 my_index = ["ps_packetloss-2018*"]
 params = config()
 conn = psycopg2.connect(**params)
@@ -223,7 +224,7 @@ def updateSummary( item ):
     format_ts = time.strftime("%Y-%m-%d %H:%M:%S-0000", time.gmtime(rt_ts))
     try:
         #if this src/dest pair not yet tracked in packet loss, add it w/ count of 1
-        cur.execute("INSERT INTO losscount (src, dest, count, min_ts, max_ts) VALUES (%s, %s, %s)", (rt_src, rt_dest, 1, format_ts, format_ts))
+        cur.execute("INSERT INTO losscount (src, dest, count, min_ts, max_ts) VALUES (%s, %s, %s, %s, %s)", (rt_src, rt_dest, '1', format_ts, format_ts))
         conn.commit()
     except IntegrityError:
         conn.rollback()
@@ -249,7 +250,7 @@ def updateSummary( item ):
                 conn.commit()
             else:
                 #else add 1 to count normally
-                cur.execute("UPDATE losscount SET count = %s, max_ts WHERE src = %s AND dest = %s", (current_count+1, format_ts, rt_src, rt_dest))
+                cur.execute("UPDATE losscount SET count = %s, max_ts = %s WHERE src = %s AND dest = %s", (current_count+1, format_ts, rt_src, rt_dest))
                 conn.commit()
 
 #remove lock
