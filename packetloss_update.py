@@ -51,7 +51,6 @@ if cur.fetchone() is None:
     start_date = '20180101T000000Z'
 #else start from 1 second past latest entry in raw table
 else:
-    #cur.execute("SELECT to_char(max(timestamp+interval '1 sec'),'YYYYMMDD\"T\"HHMISS\"Z\"') FROM rawpacketdata")
     #This will return linux epoch timestamp in milliseconds. Casting as a string.
     cur.execute("SELECT CAST(1000*extract(epoch FROM(max(timestamp + interval '1 sec'))) AS text ) FROM rawpacketdata")
     start_date = cur.fetchone()[0]
