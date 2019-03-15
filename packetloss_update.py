@@ -8,26 +8,28 @@ import psycopg2
 from psycopg2 import IntegrityError
 from config import config
 import os
-import os.path 
+import os.path
 from pathlib import Path
+
+
+
 
 #checks to see if this process is currently running
 #if not running, make a lock file
 lock_file = Path("/var/lock/plDBupdate")
 if lock_file.is_file():
-  print'Detected instance of process already running at ' + str(datetime.now())
-  quit()
+    print'Detected instance of process already running at ' + str(datetime.now())
+    quit()
 else:
-  print 'Starting to create lock at ' + str(datetime.now())
-  lk_file = open('/var/lock/plDBupdate', "w")
-  print 'Lock created at ' + str(datetime.now()) 
-  lk_file.close()
-  print 'File closed at ' + str(datetime.now())
+    print 'Starting to create lock at ' + str(datetime.now())
+    lk_file = open('/var/lock/plDBupdate', "w")
+    print 'Lock created at ' + str(datetime.now())
+    lk_file.close()
+    print 'File closed at ' + str(datetime.now())
 
 #connect to the database
 es = elasticsearch.Elasticsearch(['atlas-kibana.mwt2.org:9200'],timeout=60)
-#
-my_index = ["ps_packetloss-2018*"]
+my_index = ["ps_packetloss"]
 params = config()
 conn = psycopg2.connect(**params)
 cur = conn.cursor()
@@ -46,12 +48,17 @@ end_date = curr_year + now.strftime("%m") + curr_day + 'T' + curr_hr + curr_min 
 cur.execute("SELECT * FROM rawpacketdata limit 1")
 #if None, raw table empty, start from beginning of year
 if cur.fetchone() is None:
-  start_date = '20180101T000000Z'
+    start_date = '20180101T000000Z'
 #else start from 1 second past latest entry in raw table
 else:
-  cur.execute("SELECT to_char(max(timestamp+interval '1 sec'),'YYYYMMDD\"T\"HHMISS\"Z\"') FROM rawpacketdata")
-  start_date = cur.fetchone()[0]
+    #cur.execute("SELECT to_char(max(timestamp+interval '1 sec'),'YYYYMMDD\"T\"HHMISS\"Z\"') FROM rawpacketdata")
+    #This will return linux epoch timestamp in milliseconds. Casting as a string.
+    cur.execute("SELECT CAST(1000*extract(epoch FROM(max(timestamp + interval '1 sec'))) AS text ) FROM rawpacketdata")
+    start_date = cur.fetchone()[0]
+    print("cur.fetchone is ", start_date)
 print 'Dates set at ' + str(datetime.now())
+
+
 
 #build and run the query
 my_query = {
@@ -62,14 +69,16 @@ my_query = {
     'query':{
         'bool':{
             'must':[
-                {'range': {'timestamp': {'gte': start_date, 'lt': end_date}}},
-            ]
+                    {'range': {'timestamp': {'gte': start_date, 'lt': end_date}}},
+                    ]
 
-        }
-    },
+    }
+},
 }
+
 results = elasticsearch.helpers.scan(es, query=my_query, index=my_index, raise_on_error = True, request_timeout=100000, size=1000)
 print 'Results compiled at ' + str(datetime.now())
+
 
 #updates the raw traceroute data table
 def updateRaw( item ):
@@ -81,13 +90,14 @@ def updateRaw( item ):
     #match appropriate format for the database timestamps
     format_ts = time.strftime("%Y-%m-%d %H:%M:%S-0000", time.gmtime(rt_ts))
     try:
-        #try to insert the new data into the raw data table
-        cur.execute("INSERT INTO rawpacketdata (src, dest, loss, timestamp) VALUES (%s, %s, %s, %s)", (rt_src, rt_dest, rt_loss, format_ts))
-        conn.commit()
+    #try to insert the new data into the raw data table
+    cur.execute("INSERT INTO rawpacketdata (src, dest, loss, timestamp) VALUES (%s, %s, %s, %s)", (rt_src, rt_dest, rt_loss, format_ts))
+    conn.commit()
     except IntegrityError:
-        #if IntegrityError, failed due to key violation (src, dest, timestamp triple already in table)
-        #in that case, continue (skip to next iteration of loop)
-        conn.rollback()
+    #if IntegrityError, failed due to key violation (src, dest, timestamp triple already in table)
+    #in that case, continue (skip to next iteration of loop)
+    print("INTEGRITY ERROR")
+    conn.rollback()
         pass
 
 #updates the server lookup table
@@ -170,7 +180,7 @@ def updateLookup ( item ):
                 conn.commit()
     #for destination, logic at each individual step is same as the logic for the source nodes
     #destination is ipv6
-    if ':' in rt_dest:      
+    if ':' in rt_dest:
         cur.execute("SELECT ipv6 FROM serverlookup WHERE ipv6 = (%s)", (rt_dest,))
         if cur.fetchone() is None:
             cur.execute("SELECT ipv4 FROM serverlookup WHERE domain = (%s)", (dest_name,))
@@ -191,14 +201,14 @@ def updateLookup ( item ):
             if cur == 'missing':
                 cur.execute("UPDATE serverlookup SET sitename = %s WHERE ipv6 = %s", (dest_site, rt_dest))
                 conn.commit()
-    #destination is ipv4
-    else:
-        cur.execute("SELECT ipv4 FROM serverlookup WHERE ipv4 = (%s)", (rt_dest,))
+#destination is ipv4
+else:
+    cur.execute("SELECT ipv4 FROM serverlookup WHERE ipv4 = (%s)", (rt_dest,))
+    if cur.fetchone() is None:
+        cur.execute("SELECT ipv6 FROM serverlookup WHERE domain = (%s)", (dest_name,))
         if cur.fetchone() is None:
-            cur.execute("SELECT ipv6 FROM serverlookup WHERE domain = (%s)", (dest_name,))
-            if cur.fetchone() is None:
-                cur.execute("INSERT INTO serverlookup (domain, ipv4, sitename) VALUES (%s, %s, %s)", (dest_name, rt_dest, dest_site))
-                conn.commit()
+            cur.execute("INSERT INTO serverlookup (domain, ipv4, sitename) VALUES (%s, %s, %s)", (dest_name, rt_dest, dest_site))
+            conn.commit()
             else:
                 cur.execute("UPDATE serverlookup SET domain = %s, ipv4 = %s WHERE domain = %s", (dest_name, rt_dest, dest_name))
                 conn.commit()
@@ -253,12 +263,15 @@ def updateSummary( item ):
                 cur.execute("UPDATE losscount SET count = %s, max_ts = %s WHERE src = %s AND dest = %s", (current_count+1, format_ts, rt_src, rt_dest))
                 conn.commit()
 
+
+number = 0
+
 #remove lock
 def rm_lock():
     print 'Starting to remove lock at ' + str(datetime.now())
     os.remove('/var/lock/plDBupdate')
     print 'Lock removed at ' + str(datetime.now())
-    
+
 #loops through everything in results and then calls all update functions on each item
 print 'The main loop of this run started at ' + str(datetime.now())
 for item in results:
