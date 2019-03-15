@@ -26,7 +26,7 @@ else:
 
 #connect to the database
 es = elasticsearch.Elasticsearch(['atlas-kibana.mwt2.org:9200'],timeout=60)
-my_index = ["ps_trace-2018*"]
+my_index = ["ps_trace"]
 params = config()
 conn = psycopg2.connect(**params)
 cur = conn.cursor()
@@ -48,7 +48,8 @@ if cur.fetchone() is None:
   start_date = '20180101T000000Z'
 #else start from 1 second past latest entry in raw table
 else:
-  cur.execute("SELECT to_char(max(timestamp+interval '1 sec'),'YYYYMMDD\"T\"HHMISS\"Z\"') FROM rawtracedata")
+  #cur.execute("SELECT to_char(max(timestamp+interval '1 sec'),'YYYYMMDD\"T\"HHMISS\"Z\"') FROM rawtracedata")
+  cur.execute("SELECT CAST(1000*extract(epoch FROM(max(timestamp + interval '1 sec'))) AS text ) FROM rawtracedata")
   start_date = cur.fetchone()[0]
 print 'Dates set at ' + str(datetime.now())
 
